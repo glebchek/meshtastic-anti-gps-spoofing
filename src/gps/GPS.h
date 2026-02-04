@@ -11,6 +11,11 @@
 #include "input/UpDownInterruptImpl1.h"
 #include "modules/PositionModule.h"
 
+#if !defined(MESHTASTIC_EXCLUDE_GPS_SPOOF_DETECTION)
+#include "GSVParser.h"
+class GPSSpoofDetector;
+#endif
+
 // Allow defining the polarity of the ENABLE output.  default is active high
 #ifndef GPS_EN_ACTIVE
 #define GPS_EN_ACTIVE 1
@@ -254,6 +259,14 @@ class GPS : private concurrency::OSThread
 
     // delay counter to allow more sats before fixed position stops GPS thread
     uint8_t fixeddelayCtr = 0;
+
+#if !defined(MESHTASTIC_EXCLUDE_GPS_SPOOF_DETECTION)
+    GSVParser gsvParser;
+    GPSSpoofDetector *spoofDetector = nullptr;
+    bool spoofingDetected = false;
+    uint8_t spoofCleanCount = 0;
+    static constexpr uint8_t SPOOF_HOLD_EPOCHS = 3; // Require 3 consecutive CLEAN before clearing
+#endif
 };
 
 extern GPS *gps;

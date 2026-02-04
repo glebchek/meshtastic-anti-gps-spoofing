@@ -21,6 +21,10 @@
 #include "cas.h"
 #include "ubx.h"
 
+#if !defined(MESHTASTIC_EXCLUDE_GPS_SPOOF_DETECTION)
+#include "GPSSpoofDetector.h"
+#endif
+
 #ifdef ARCH_PORTDUINO
 #include "PortduinoGlue.h"
 #include "meshUtils.h"
@@ -534,12 +538,20 @@ bool GPS::setup()
             // Initialize the L76K Chip, use GPS + GLONASS + BEIDOU
             _serial_gps->write("$PCAS04,7*1E\r\n");
             delay(250);
+#if !defined(MESHTASTIC_EXCLUDE_GPS_SPOOF_DETECTION)
+            // GGA + GSV (every 3rd fix) + RMC -- enables C/N0-based spoof detection
+            _serial_gps->write("$PCAS03,1,0,0,3,1,0,0,0,0,0,,,0,0*01\r\n");
+#else
             // only ask for RMC and GGA
             _serial_gps->write("$PCAS03,1,0,0,0,1,0,0,0,0,0,,,0,0*02\r\n");
+#endif
             delay(250);
             // Switch to Vehicle Mode, since SoftRF enables Aviation < 2g
             _serial_gps->write("$PCAS11,3*1E\r\n");
             delay(250);
+#if !defined(MESHTASTIC_EXCLUDE_GPS_SPOOF_DETECTION)
+            spoofDetector = new GPSSpoofDetector();
+#endif
         } else if (gnssModel == GNSS_MODEL_MTK_L76B) {
             // Waveshare Pico-GPS hat uses the L76B with 9600 baud
             // Initialize the L76B Chip, use GPS + GLONASS
@@ -819,6 +831,9 @@ GPS::~GPS()
 {
     // we really should unregister our sleep observer
     notifyDeepSleepObserver.unobserve(&notifyDeepSleep);
+#if !defined(MESHTASTIC_EXCLUDE_GPS_SPOOF_DETECTION)
+    delete spoofDetector;
+#endif
 }
 
 // Put the GPS hardware into a specified state
@@ -1707,6 +1722,13 @@ bool GPS::lookForLocation()
     if (!hasLock())
         return false;
 
+#if !defined(MESHTASTIC_EXCLUDE_GPS_SPOOF_DETECTION)
+    if (spoofingDetected) {
+        LOG_WARN("GPS position rejected: spoofing detected");
+        return false;
+    }
+#endif
+
 #ifdef GPS_DEBUG
     LOG_DEBUG("AGE: LOC=%d FIX=%d DATE=%d TIME=%d", reader.location.age(),
 #ifndef TINYGPS_OPTION_NO_CUSTOM_FIELDS
@@ -1857,6 +1879,27 @@ bool GPS::whileActive()
         debugmsg += vformat("%c", (c >= 32 && c <= 126) ? c : '.');
 #endif
         isValid |= reader.encode(c);
+#if !defined(MESHTASTIC_EXCLUDE_GPS_SPOOF_DETECTION)
+        if (spoofDetector && gsvParser.encode(c)) {
+            auto result = spoofDetector->evaluate(gsvParser.getSatellites(), gsvParser.getSatCount());
+            if (result == SpoofResult::SPOOFING_DETECTED) {
+                if (!spoofingDetected)
+                    LOG_WARN("GPS SPOOFING DETECTED: C/N0 anomaly (mean=%.1f, stddev=%.1f, high=%u)",
+                             spoofDetector->lastMeanCN0(), spoofDetector->lastStdDev(),
+                             spoofDetector->lastHighCN0Count());
+                spoofingDetected = true;
+                spoofCleanCount = 0;
+            } else if (spoofingDetected) {
+                spoofCleanCount++;
+                if (spoofCleanCount >= SPOOF_HOLD_EPOCHS) {
+                    LOG_INFO("GPS spoofing condition cleared");
+                    spoofingDetected = false;
+                    spoofCleanCount = 0;
+                }
+            }
+            gsvParser.reset();
+        }
+#endif
         if (charsInBuf > sizeof(UBXscratch) - 10 || c == '\r') {
             if (strnstr((char *)UBXscratch, "$GPTXT,01,01,02,u-blox ag - www.u-blox.com*50", charsInBuf)) {
                 rebootsSeen++;
