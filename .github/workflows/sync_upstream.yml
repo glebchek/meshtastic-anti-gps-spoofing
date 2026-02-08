@@ -1,0 +1,106 @@
+name: Sync with upstream release
+
+on:
+  schedule:
+    - cron: "0 */6 * * *" # Every 6 hours
+  workflow_dispatch:
+    inputs:
+      upstream_tag:
+        description: "Upstream release tag (e.g. v2.6.0.abcdef). Leave empty for latest."
+        required: false
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: anti-gps-spoofing
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Add upstream and fetch
+        run: |
+          git remote add upstream https://github.com/meshtastic/firmware.git
+          git fetch upstream --tags
+
+      - name: Determine target upstream tag
+        id: target
+        run: |
+          if [ -n "${{ inputs.upstream_tag }}" ]; then
+            TAG="${{ inputs.upstream_tag }}"
+          else
+            TAG=$(gh release view --repo meshtastic/firmware --json tagName -q '.tagName')
+          fi
+          COMMIT=$(git rev-list -1 "$TAG")
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "commit=$COMMIT" >> $GITHUB_OUTPUT
+          echo "Target upstream: $TAG ($COMMIT)"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Read current base
+        id: current
+        run: |
+          BASE=$(cat .upstream-base | tr -d '[:space:]')
+          echo "base=$BASE" >> $GITHUB_OUTPUT
+          echo "Current base: $BASE"
+
+      - name: Check if sync needed
+        id: check
+        run: |
+          TARGET="${{ steps.target.outputs.commit }}"
+          CURRENT="${{ steps.current.outputs.base }}"
+          if git merge-base --is-ancestor "$CURRENT" "$TARGET" && [ "$CURRENT" != "$TARGET" ]; then
+            echo "skip=false" >> $GITHUB_OUTPUT
+            echo "New upstream release detected, syncing..."
+          else
+            echo "skip=true" >> $GITHUB_OUTPUT
+            echo "Already up to date (or target is older)"
+          fi
+
+      - name: Rebase patches onto new upstream
+        if: steps.check.outputs.skip == 'false'
+        run: |
+          OLD_BASE="${{ steps.current.outputs.base }}"
+          NEW_TAG="${{ steps.target.outputs.tag }}"
+          NEW_COMMIT="${{ steps.target.outputs.commit }}"
+
+          echo "Rebasing from $OLD_BASE onto $NEW_TAG..."
+          git rebase --onto "$NEW_TAG" "$OLD_BASE"
+
+          # Update the base marker
+          echo "$NEW_COMMIT" > .upstream-base
+          git add .upstream-base
+          git commit -m "Update upstream base to $NEW_TAG"
+
+      - name: Force push
+        if: steps.check.outputs.skip == 'false'
+        run: git push origin HEAD:anti-gps-spoofing --force
+
+      - name: Trigger release build
+        if: steps.check.outputs.skip == 'false'
+        run: |
+          echo "Waiting 10s for branch to propagate..."
+          sleep 10
+          gh workflow run "CI" --ref anti-gps-spoofing
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Summary
+        if: steps.check.outputs.skip == 'false'
+        run: |
+          echo "## Sync complete" >> $GITHUB_STEP_SUMMARY
+          echo "- Upstream: ${{ steps.target.outputs.tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Previous base: ${{ steps.current.outputs.base }}" >> $GITHUB_STEP_SUMMARY
+          echo "- New base: ${{ steps.target.outputs.commit }}" >> $GITHUB_STEP_SUMMARY
+          echo "- CI release build triggered" >> $GITHUB_STEP_SUMMARY
