@@ -76,7 +76,7 @@ Before any checks run, satellites with C/N0 < 20 dBHz are excluded. These are ty
 
 | # | Check | Condition | Threshold | Rationale |
 |---|-------|-----------|-----------|-----------|
-| 1 | **Uniformity** | Std dev of C/N0 | < 3.5 dBHz | Real satellites have varied C/N0 (5-15 dBHz std dev) due to different elevations and atmospheric paths. A single-antenna spoofer broadcasts all signals at similar power. |
+| 1 | **Uniformity** | Std dev of C/N0 (requires >= 8 sats) | < 3.5 dBHz | Real satellites have varied C/N0 (5-15 dBHz std dev) due to different elevations and atmospheric paths. A single-antenna spoofer broadcasts all signals at similar power. Skipped when fewer than 8 satellites are available, since indoor reception with few satellites naturally produces low C/N0 variance due to uniform wall attenuation. |
 | 2 | **High C/N0** | Fraction with C/N0 > 45 | > 80% | Low-elevation satellites naturally have low C/N0. A spoofer often over-powers all signals. |
 | 3 | **Sudden Jump** | Avg absolute C/N0 delta vs previous epoch (matched by PRN) | > 10.0 dBHz | Real C/N0 changes 1-3 dBHz per epoch. Spoofing onset causes an abrupt jump across all satellites. |
 | 4 | **Ratio** | Fraction with C/N0 > 40 (when > 8 sats) | > 80% | Sanity check correlating with the High C/N0 check at a different threshold. |
@@ -89,6 +89,11 @@ Before any checks run, satellites with C/N0 < 20 dBHz are excluded. These are ty
 - 2+ warnings: `SPOOFING_DETECTED` (position rejected)
 
 Minimum 4 satellites (after filtering) are required to run detection. Below this threshold, the result is always `CLEAN`.
+
+Individual checks have their own minimum satellite requirements:
+- **Uniformity**: >= 8 satellites (indoor signals with few sats have naturally low C/N0 variance)
+- **Ratio**: >= 8 satellites
+- **Elevation Correlation**: >= 6 satellites with valid elevation data, >= 30° elevation spread
 
 ### Memory Usage
 

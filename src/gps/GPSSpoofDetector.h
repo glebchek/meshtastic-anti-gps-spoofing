@@ -42,6 +42,7 @@ class GPSSpoofDetector {
     static constexpr float RATIO_FRACTION = 0.80f;               // 80%
     static constexpr uint8_t RATIO_MIN_SATS = 8;                 // Only check ratio if enough sats
     static constexpr uint8_t MIN_SATS_FOR_DETECTION = 4;
+    static constexpr uint8_t UNIFORMITY_MIN_SATS = 8;         // Uniformity unreliable with few sats (indoor)
     static constexpr uint8_t MIN_CN0_FOR_ANALYSIS = 20;       // Ignore weak/almanac-only sats
     static constexpr float ELEV_CORR_THRESHOLD = 0.5f;        // Min expected Pearson correlation
     static constexpr uint8_t ELEV_MIN_SATS = 6;               // Need enough sats with elevation

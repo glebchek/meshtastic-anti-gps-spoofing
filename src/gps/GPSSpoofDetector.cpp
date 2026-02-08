@@ -67,6 +67,10 @@ SpoofResult GPSSpoofDetector::evaluate(const SatelliteCN0 *sats, uint8_t count)
 
 bool GPSSpoofDetector::checkUniformity(const SatelliteCN0 *sats, uint8_t count)
 {
+    // With few satellites (indoor), low stddev is normal - skip check
+    if (count < UNIFORMITY_MIN_SATS)
+        return false;
+
     // Compute mean
     float sum = 0.0f;
     for (uint8_t i = 0; i < count; i++) {
